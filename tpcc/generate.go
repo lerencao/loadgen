@@ -60,16 +60,17 @@ func parallelLoad(n int, batchSize int, entityName string, loader func(int, int)
 		log.Fatalf("invalid batch size doesn't divide n: %d %d", batchSize, n)
 	}
 	var wg sync.WaitGroup
-	ch := make(chan int, n/batchSize)
-	for id := 0; id < n/batchSize; id++ {
-		ch <- id
+
+	chs := make(map[int]chan int, *concurrency)
+	for i := 0; i < *concurrency; i++ {
+		chs[i] = make(chan int, n / batchSize)
 	}
-	close(ch)
 
 	outCh := make(chan int, 1000)
 	start := time.Now()
 	for i := 0; i < *concurrency; i++ {
 		wg.Add(1)
+		ch := chs[i]
 		go func() {
 			defer wg.Done()
 			for id := range ch {
@@ -78,11 +79,17 @@ func parallelLoad(n int, batchSize int, entityName string, loader func(int, int)
 			}
 		}()
 	}
-
 	go func() {
 		wg.Wait()
 		close(outCh)
 	}()
+
+	for id :=0; id < n / batchSize; id++ {
+		chs[id % *concurrency] <- id
+	}
+	for i := 0; i < *concurrency; i++ {
+		close(chs[i])
+	}
 
 	i := 1
 	for range outCh {
